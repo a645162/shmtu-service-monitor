@@ -1,5 +1,13 @@
-export interface Service {
+export interface MonitorServer {
   id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+export interface ServiceInstance {
+  id: number;
+  server_id: number;
   name: string;
   service_type: string;
   base_url: string;
@@ -9,7 +17,7 @@ export interface Service {
 
 export interface ServiceStatus {
   id: number;
-  service_id: number;
+  instance_id: number;
   status: 'healthy' | 'busy' | 'unavailable';
   availability_level: string;
   models_loaded: boolean;
@@ -24,7 +32,12 @@ export interface ServiceStatus {
   response_time_ms: number;
 }
 
-export interface CreateServiceRequest {
+export interface CreateServerRequest {
+  name: string;
+  description?: string;
+}
+
+export interface CreateInstanceRequest {
   name: string;
   service_type: string;
   base_url: string;
@@ -32,14 +45,25 @@ export interface CreateServiceRequest {
 }
 
 export interface DashboardSummary {
-  total_services: number;
-  healthy_services: number;
-  busy_services: number;
-  unavailable_services: number;
-  services: ServiceDashboardEntry[];
+  total_servers: number;
+  total_instances: number;
+  healthy_instances: number;
+  busy_instances: number;
+  unavailable_instances: number;
+  servers: ServerDashboardEntry[];
 }
 
-export interface ServiceDashboardEntry {
-  service: Service;
+export interface ServerDashboardEntry {
+  server: MonitorServer;
+  instances: InstanceDashboardEntry[];
+}
+
+export interface InstanceDashboardEntry {
+  instance: ServiceInstance;
   latest_status: ServiceStatus | null;
+}
+
+export interface ServerDetail {
+  server: MonitorServer;
+  instances: InstanceDashboardEntry[];
 }

@@ -6,14 +6,31 @@ use axum::{
 use sqlx::SqlitePool;
 
 use crate::db::sqlite;
-use crate::models::{CreateServiceRequest, HistoryQuery, Service, ServiceStatus};
+use crate::models::{CreateInstanceRequest, HistoryQuery, ServiceInstance, ServiceStatus};
 
-/// POST /api/services — Register a new service.
-pub async fn register_service(
+/// POST /api/servers/:server_id/instances — Register a new instance under a server.
+pub async fn register_instance(
     State(pool): State<SqlitePool>,
-    Json(req): Json<CreateServiceRequest>,
-) -> Result<(StatusCode, Json<Service>), (StatusCode, Json<serde_json::Value>)> {
-    // Validate base_url
+    Path(server_id): Path<i64>,
+    Json(req): Json<CreateInstanceRequest>,
+) -> Result<(StatusCode, Json<ServiceInstance>), (StatusCode, Json<serde_json::Value>)> {
+    // Verify server exists
+    match sqlite::get_server(&pool, server_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Server not found"})),
+            ))
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            ))
+        }
+    }
+
     if req.base_url.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -21,7 +38,6 @@ pub async fn register_service(
         ));
     }
 
-    // Validate service_type
     let valid_types = ["dotnet-ocr", "cpp-ocr", "rust-ocr"];
     if !valid_types.contains(&req.service_type.as_str()) {
         return Err((
@@ -32,8 +48,9 @@ pub async fn register_service(
         ));
     }
 
-    match sqlite::insert_service(
+    match sqlite::insert_instance(
         &pool,
+        server_id,
         &req.name,
         &req.service_type,
         &req.base_url,
@@ -41,7 +58,7 @@ pub async fn register_service(
     )
     .await
     {
-        Ok(service) => Ok((StatusCode::CREATED, Json(service))),
+        Ok(instance) => Ok((StatusCode::CREATED, Json(instance))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),
@@ -49,12 +66,13 @@ pub async fn register_service(
     }
 }
 
-/// GET /api/services — List all services.
-pub async fn list_services(
+/// GET /api/servers/:server_id/instances — List instances under a server.
+pub async fn list_instances(
     State(pool): State<SqlitePool>,
-) -> Result<Json<Vec<Service>>, (StatusCode, Json<serde_json::Value>)> {
-    match sqlite::list_services(&pool).await {
-        Ok(services) => Ok(Json(services)),
+    Path(server_id): Path<i64>,
+) -> Result<Json<Vec<ServiceInstance>>, (StatusCode, Json<serde_json::Value>)> {
+    match sqlite::list_instances_by_server(&pool, server_id).await {
+        Ok(instances) => Ok(Json(instances)),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),
@@ -62,16 +80,16 @@ pub async fn list_services(
     }
 }
 
-/// GET /api/services/:id — Get service detail.
-pub async fn get_service(
+/// GET /api/instances/:id — Get instance detail.
+pub async fn get_instance(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
-) -> Result<Json<Service>, (StatusCode, Json<serde_json::Value>)> {
-    match sqlite::get_service(&pool, id).await {
-        Ok(Some(service)) => Ok(Json(service)),
+) -> Result<Json<ServiceInstance>, (StatusCode, Json<serde_json::Value>)> {
+    match sqlite::get_instance(&pool, id).await {
+        Ok(Some(instance)) => Ok(Json(instance)),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Service not found"})),
+            Json(serde_json::json!({"error": "Instance not found"})),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -80,16 +98,16 @@ pub async fn get_service(
     }
 }
 
-/// DELETE /api/services/:id — Delete a service.
-pub async fn delete_service(
+/// DELETE /api/instances/:id — Delete an instance.
+pub async fn delete_instance(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    match sqlite::delete_service(&pool, id).await {
+    match sqlite::delete_instance(&pool, id).await {
         Ok(true) => Ok(StatusCode::NO_CONTENT),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Service not found"})),
+            Json(serde_json::json!({"error": "Instance not found"})),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -98,18 +116,17 @@ pub async fn delete_service(
     }
 }
 
-/// GET /api/services/:id/status — Get the latest status for a service.
-pub async fn get_service_status(
+/// GET /api/instances/:id/status — Get the latest status for an instance.
+pub async fn get_instance_status(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
 ) -> Result<Json<ServiceStatus>, (StatusCode, Json<serde_json::Value>)> {
-    // Verify service exists
-    match sqlite::get_service(&pool, id).await {
+    match sqlite::get_instance(&pool, id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Service not found"})),
+                Json(serde_json::json!({"error": "Instance not found"})),
             ))
         }
         Err(e) => {
@@ -124,7 +141,7 @@ pub async fn get_service_status(
         Ok(Some(status)) => Ok(Json(status)),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "No status data available for this service"})),
+            Json(serde_json::json!({"error": "No status data available for this instance"})),
         )),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -133,19 +150,18 @@ pub async fn get_service_status(
     }
 }
 
-/// GET /api/services/:id/history — Get historical statuses for a service.
-pub async fn get_service_history(
+/// GET /api/instances/:id/history — Get historical statuses for an instance.
+pub async fn get_instance_history(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<ServiceStatus>>, (StatusCode, Json<serde_json::Value>)> {
-    // Verify service exists
-    match sqlite::get_service(&pool, id).await {
+    match sqlite::get_instance(&pool, id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Service not found"})),
+                Json(serde_json::json!({"error": "Instance not found"})),
             ))
         }
         Err(e) => {
@@ -158,14 +174,8 @@ pub async fn get_service_history(
 
     let limit = query.limit.unwrap_or(100).min(1000);
 
-    match sqlite::get_status_history(
-        &pool,
-        id,
-        query.from.as_deref(),
-        query.to.as_deref(),
-        limit,
-    )
-    .await
+    match sqlite::get_status_history(&pool, id, query.from.as_deref(), query.to.as_deref(), limit)
+        .await
     {
         Ok(history) => Ok(Json(history)),
         Err(e) => Err((

@@ -1,10 +1,9 @@
 use sqlx::SqlitePool;
 
 use crate::db::sqlite;
-use crate::models::ServiceStatus;
 
-/// Aggregates statistics for a service over a given time window.
-pub struct ServiceAggregation {
+/// Aggregates statistics for an instance over a given time window.
+pub struct InstanceAggregation {
     pub total_polls: i64,
     pub healthy_count: i64,
     pub unavailable_count: i64,
@@ -13,17 +12,17 @@ pub struct ServiceAggregation {
     pub uptime_percent: f64,
 }
 
-/// Compute aggregate statistics for a service from its recent status history.
-pub async fn aggregate_service_stats(
+/// Compute aggregate statistics for an instance from its recent status history.
+pub async fn aggregate_instance_stats(
     pool: &SqlitePool,
-    service_id: i64,
+    instance_id: i64,
     limit: i64,
-) -> anyhow::Result<ServiceAggregation> {
-    let history = sqlite::get_status_history(pool, service_id, None, None, limit).await?;
+) -> anyhow::Result<InstanceAggregation> {
+    let history = sqlite::get_status_history(pool, instance_id, None, None, limit).await?;
 
     let total_polls = history.len() as i64;
     if total_polls == 0 {
-        return Ok(ServiceAggregation {
+        return Ok(InstanceAggregation {
             total_polls: 0,
             healthy_count: 0,
             unavailable_count: 0,
@@ -51,7 +50,7 @@ pub async fn aggregate_service_stats(
 
     let uptime_percent = (healthy_count as f64 / total_polls as f64) * 100.0;
 
-    Ok(ServiceAggregation {
+    Ok(InstanceAggregation {
         total_polls,
         healthy_count,
         unavailable_count,

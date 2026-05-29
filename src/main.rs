@@ -14,12 +14,11 @@ mod services;
 
 use config::AppConfig;
 use db::sqlite::init_db;
-use handlers::{monitoring, service};
+use handlers::{instance, monitoring, server};
 use services::poller::Poller;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -28,35 +27,49 @@ async fn main() -> anyhow::Result<()> {
 
     let config = AppConfig::from_env();
 
-    // Initialize SQLite pool
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(&config.database_url)
         .await?;
 
-    // Run migrations (create tables)
     init_db(&pool).await?;
 
-    // Start the poller
     let poller = Poller::new(pool.clone(), config.poll_interval_secs);
     let poller_handle = tokio::spawn(async move {
         poller.run().await;
     });
 
-    // Build the API router
-    let api_routes = Router::new()
-        .route("/services", axum::routing::post(service::register_service))
-        .route("/services", axum::routing::get(service::list_services))
-        .route("/services/{id}", axum::routing::get(service::get_service))
-        .route("/services/{id}", axum::routing::delete(service::delete_service))
-        .route("/services/{id}/status", axum::routing::get(service::get_service_status))
-        .route("/services/{id}/history", axum::routing::get(service::get_service_history))
-        .route("/dashboard", axum::routing::get(monitoring::get_dashboard))
+    // Server group routes
+    let server_routes = Router::new()
+        .route("/", axum::routing::post(server::create_server))
+        .route("/", axum::routing::get(server::list_servers))
+        .route("/{id}", axum::routing::get(server::get_server))
+        .route("/{id}", axum::routing::delete(server::delete_server))
+        .route("/{id}/detail", axum::routing::get(monitoring::get_server_detail))
+        .route("/{server_id}/instances", axum::routing::post(instance::register_instance))
+        .route("/{server_id}/instances", axum::routing::get(instance::list_instances))
         .with_state(pool.clone());
+
+    // Instance routes
+    let instance_routes = Router::new()
+        .route("/{id}", axum::routing::get(instance::get_instance))
+        .route("/{id}", axum::routing::delete(instance::delete_instance))
+        .route("/{id}/status", axum::routing::get(instance::get_instance_status))
+        .route("/{id}/history", axum::routing::get(instance::get_instance_history))
+        .with_state(pool.clone());
+
+    // Dashboard
+    let dashboard_routes = Router::new()
+        .route("/", axum::routing::get(monitoring::get_dashboard))
+        .with_state(pool.clone());
+
+    let api_routes = Router::new()
+        .nest("/servers", server_routes)
+        .nest("/instances", instance_routes)
+        .nest("/dashboard", dashboard_routes);
 
     let app = Router::new()
         .nest("/api", api_routes)
-        // Serve frontend static files in production
         .fallback_service(ServeDir::new("frontend/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive());
 

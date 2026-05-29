@@ -1,2 +1,3 @@
+pub mod instance;
 pub mod monitoring;
-pub mod service;
+pub mod server;

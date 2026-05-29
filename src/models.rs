@@ -1,20 +1,39 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A registered service to be monitored.
+/// A monitored server group (e.g. "Production OCR Cluster").
+/// Each server can contain multiple service instances.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct Service {
+pub struct MonitorServer {
     pub id: i64,
     pub name: String,
+    pub description: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Request body for creating a new server group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateServerRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// A single service instance belonging to a server group.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ServiceInstance {
+    pub id: i64,
+    pub server_id: i64,
+    pub name: String,
     pub service_type: String, // "dotnet-ocr", "cpp-ocr", "rust-ocr"
-    pub base_url: String,     // e.g. "http://192.168.1.10:21600"
+    pub base_url: String,
     pub poll_interval_secs: i64,
     pub created_at: DateTime<Utc>,
 }
 
-/// Request body for registering a new service.
+/// Request body for registering a new service instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateServiceRequest {
+pub struct CreateInstanceRequest {
     pub name: String,
     pub service_type: String,
     pub base_url: String,
@@ -30,7 +49,7 @@ fn default_poll_interval() -> i64 {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ServiceStatus {
     pub id: i64,
-    pub service_id: i64,
+    pub instance_id: i64,
     pub status: String, // "healthy", "busy", "unavailable"
     pub availability_level: String,
     pub models_loaded: bool,
@@ -46,7 +65,6 @@ pub struct ServiceStatus {
 }
 
 /// The response we expect from a service's /api/status endpoint.
-/// This mirrors the dotnet OCR server's status response format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteServiceStatus {
     pub status: Option<String>,
@@ -60,6 +78,7 @@ pub struct RemoteServiceStatus {
     pub total_requests: Option<i64>,
     pub success_count: Option<i64>,
     pub failure_count: Option<i64>,
+    pub server_name: Option<String>,
 }
 
 /// The health response we expect from /api/health.
@@ -72,28 +91,43 @@ pub struct RemoteHealthResponse {
     pub pool_size: Option<i32>,
     pub queue_capacity: Option<i32>,
     pub pending_requests: Option<i32>,
+    pub server_name: Option<String>,
 }
 
 /// Dashboard summary data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardSummary {
-    pub total_services: i64,
-    pub healthy_services: i64,
-    pub busy_services: i64,
-    pub unavailable_services: i64,
-    pub services: Vec<ServiceDashboardEntry>,
+    pub total_servers: i64,
+    pub total_instances: i64,
+    pub healthy_instances: i64,
+    pub busy_instances: i64,
+    pub unavailable_instances: i64,
+    pub servers: Vec<ServerDashboardEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceDashboardEntry {
-    pub service: Service,
+pub struct ServerDashboardEntry {
+    pub server: MonitorServer,
+    pub instances: Vec<InstanceDashboardEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceDashboardEntry {
+    pub instance: ServiceInstance,
     pub latest_status: Option<ServiceStatus>,
 }
 
 /// Query parameters for history endpoint.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HistoryQuery {
-    pub from: Option<String>, // ISO 8601 datetime
+    pub from: Option<String>,
     pub to: Option<String>,
     pub limit: Option<i64>,
+}
+
+/// Server detail with its instances and their latest statuses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerDetail {
+    pub server: MonitorServer,
+    pub instances: Vec<InstanceDashboardEntry>,
 }
